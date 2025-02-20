@@ -49,7 +49,7 @@ optim:                                                      # optimization optio
 
 batch_size:                                                 # batch size (not used for NeRF/BARF)
 max_epoch:                                                  # train to maximum number of epochs (not used for NeRF/BARF)
-max_iter: 200000                                            # train to maximum number of iterations
+max_iter: 500                                          # train to maximum number of iterations
 
 trimesh:                                                    # options for marching cubes to extract 3D mesh
     res: 128                                                # 3D sampling resolution
@@ -58,7 +58,7 @@ trimesh:                                                    # options for marchi
     chunk_size: 16384                                       # chunk size of dense samples to be evaluated at a time
 
 freq:                                                       # periodic actions during training
-    scalar: 200                                             # log losses and scalar states (every N iterations)
-    vis: 1000                                               # visualize results (every N iterations)
-    val: 2000                                               # validate on val set (every N iterations)
-    ckpt: 5000                                              # save checkpoint (every N iterations)
+    scalar: 100                                             # log losses and scalar states (every N iterations)
+    vis: 50                                               # visualize results (every N iterations)
+    val: 100                                               # validate on val set (every N iterations)
+    ckpt: 100                                              # save checkpoint (every N iterations)

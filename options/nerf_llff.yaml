@@ -48,10 +48,10 @@ optim:                                                      # optimization optio
 
 batch_size:                                                 # batch size (not used for NeRF/BARF)
 max_epoch:                                                  # train to maximum number of epochs (not used for NeRF/BARF)
-max_iter: 200000                                            # train to maximum number of iterations
+max_iter: 500                                           # train to maximum number of iterations
 
 freq:                                                       # periodic actions during training
     scalar: 200                                             # log losses and scalar states (every N iterations)
     vis: 1000                                               # visualize results (every N iterations)
-    val: 2000                                               # validate on val set (every N iterations)
-    ckpt: 5000                                              # save checkpoint (every N iterations)
+    val: 100                                               # validate on val set (every N iterations)
+    ckpt: 100                                              # save checkpoint (every N iterations)

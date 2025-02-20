@@ -155,8 +155,10 @@ class Model(base.Model):
             print("writing videos...")
             rgb_vid_fname = "{}/test_view_rgb.mp4".format(opt.output_path)
             depth_vid_fname = "{}/test_view_depth.mp4".format(opt.output_path)
-            os.system("ffmpeg -y -framerate 30 -i {0}/rgb_%d.png -pix_fmt yuv420p {1} >/dev/null 2>&1".format(test_path,rgb_vid_fname))
-            os.system("ffmpeg -y -framerate 30 -i {0}/depth_%d.png -pix_fmt yuv420p {1} >/dev/null 2>&1".format(test_path,depth_vid_fname))
+            print('Video saving called 1')
+            os.system(r"ffmpeg -y -framerate 30 -i {0}/rgb_%d.png -pix_fmt yuv420p {1} ".format(test_path,rgb_vid_fname))
+            os.system(r"ffmpeg -y -framerate 30 -i {0}/depth_%d.png -pix_fmt yuv420p {1} ".format(test_path,depth_vid_fname))
+            print('Video saving ended 1')
         else:
             pose_pred,pose_GT = self.get_all_training_poses(opt)
             poses = pose_pred if opt.model=="barf" else pose_GT
@@ -184,9 +186,10 @@ class Model(base.Model):
             print("writing videos...")
             rgb_vid_fname = "{}/novel_view_rgb.mp4".format(opt.output_path)
             depth_vid_fname = "{}/novel_view_depth.mp4".format(opt.output_path)
+            print('Video saving called 2')
             os.system("ffmpeg -y -framerate 30 -i {0}/rgb_%d.png -pix_fmt yuv420p {1} >/dev/null 2>&1".format(novel_path,rgb_vid_fname))
             os.system("ffmpeg -y -framerate 30 -i {0}/depth_%d.png -pix_fmt yuv420p {1} >/dev/null 2>&1".format(novel_path,depth_vid_fname))
-
+            print('Video saving ended 2')
 # ============================ computation graph for forward/backprop ============================
 
 class Graph(base.Graph):
