@@ -23,11 +23,17 @@ class Model(base.Model):
         super().__init__(opt)
         self.lpips_loss = lpips.LPIPS(net="alex").to(opt.device)
 
-    def load_dataset(self,opt,eval_split="val"):
-        super().load_dataset(opt,eval_split=eval_split)
-        # prefetch all training data
-        self.train_data.prefetch_all_data(opt)
-        self.train_data.all = edict(util.move_to_device(self.train_data.all,opt.device))
+    def load_dataset(self, opt, eval_split="val"):
+        super().load_dataset(opt, eval_split=eval_split)
+        
+        if opt.mode == "train":
+            # Don't prefetch all training data into memory
+            # Let the DataLoader handle fetching items on demand
+            pass
+        else:
+            # Prefetch only for evaluation if needed
+            self.train_data.prefetch_all_data(opt)
+            self.train_data.all = edict(util.move_to_device(self.train_data.all, opt.device))
 
     def setup_optimizer(self,opt):
         log.info("setting up optimizers...")
@@ -44,28 +50,46 @@ class Model(base.Model):
             kwargs = { k:v for k,v in opt.optim.sched.items() if k!="type" }
             self.sched = scheduler(self.optim,**kwargs)
 
-    def train(self,opt):
-        # before training
+    def train(self, opt):
+        from torch.utils.data import DataLoader  # make sure you import this
         log.title("TRAINING START")
-        self.timer = edict(start=time.time(),it_mean=None)
+        self.timer = edict(start=time.time(), it_mean=None)
         self.graph.train()
-        self.ep = 0 # dummy for timer
-        # training
-        if self.iter_start==0: self.validate(opt,0)
-        loader = tqdm.trange(opt.max_iter,desc="training",leave=False)
-        for self.it in loader:
-            if self.it<self.iter_start: continue
-            # set var to all available images
-            var = self.train_data.all
-            self.train_iteration(opt,var,loader)
-            if opt.optim.sched: self.sched.step()
-            if self.it%opt.freq.val==0: self.validate(opt,self.it)
-            if self.it%opt.freq.ckpt==0: self.save_checkpoint(opt,ep=None,it=self.it)
-        # after training
+        self.ep = 0  # dummy for timer
+        # initialize DataLoader
+        train_loader = DataLoader(
+            self.train_data,  # assumes self.train_data is a torch-style Dataset
+            batch_size=opt.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+        if self.iter_start == 0:
+            self.validate(opt, 0)
+        iteration = 0
+        while iteration < opt.max_iter:
+            for var in train_loader:
+                if iteration < self.iter_start:
+                    iteration += 1
+                    continue
+                # Move this batch to GPU
+                var = util.move_to_device(var, opt.device)
+                # Perform one training step
+                self.train_iteration(opt, var, None)
+                if opt.optim.sched:
+                    self.sched.step()
+                if iteration % opt.freq.val == 0:
+                    self.validate(opt, iteration)
+                if iteration % opt.freq.ckpt == 0:
+                    self.save_checkpoint(opt, ep=None, it=iteration)
+                iteration += 1
+                if iteration >= opt.max_iter:
+                    break
         if opt.tb:
             self.tb.flush()
             self.tb.close()
-        if opt.visdom: self.vis.close()
+        if opt.visdom:
+            self.vis.close()
         log.title("TRAINING DONE")
 
     @torch.no_grad()
@@ -201,32 +225,32 @@ class Graph(base.Graph):
             self.nerf_fine = NeRF(opt)
 
     def forward(self,opt,var,mode=None):
-        batch_size = len(var.idx)
+        batch_size = 16
         pose = self.get_pose(opt,var,mode=mode)
         # render images
         if opt.nerf.rand_rays and mode in ["train","test-optim"]:
             # sample random rays for optimization
-            var.ray_idx = torch.randperm(opt.H*opt.W,device=opt.device)[:opt.nerf.rand_rays//batch_size]
-            ret = self.render(opt,pose,intr=var.intr,ray_idx=var.ray_idx,mode=mode) # [B,N,3],[B,N,1]
+            var["ray_idx"] = torch.randperm(opt.H*opt.W,device=opt.device)[:opt.nerf.rand_rays//batch_size]
+            ret = self.render(opt,pose,intr=var["intr"],ray_idx=var["ray_idx"],mode=mode) # [B,N,3],[B,N,1]
         else:
             # render full image (process in slices)
-            ret = self.render_by_slices(opt,pose,intr=var.intr,mode=mode) if opt.nerf.rand_rays else \
-                  self.render(opt,pose,intr=var.intr,mode=mode) # [B,HW,3],[B,HW,1]
+            ret = self.render_by_slices(opt,pose,intr=var["intr"],mode=mode) if opt.nerf.rand_rays else \
+                  self.render(opt,pose,intr=var["intr"],mode=mode) # [B,HW,3],[B,HW,1]
         var.update(ret)
         return var
 
     def compute_loss(self,opt,var,mode=None):
         loss = edict()
-        batch_size = len(var.idx)
-        image = var.image.view(batch_size,3,opt.H*opt.W).permute(0,2,1)
+        batch_size = var["idx"].numel()
+        image = var["image"].view(batch_size,3,opt.H*opt.W).permute(0,2,1)
         if opt.nerf.rand_rays and mode in ["train","test-optim"]:
-            image = image[:,var.ray_idx]
+            image = image[:,var["ray_idx"]]
         # compute image losses
         if opt.loss_weight.render is not None:
-            loss.render = self.MSE_loss(var.rgb,image)
+            loss.render = self.MSE_loss(var["rgb"],image)
         if opt.loss_weight.render_fine is not None:
             assert(opt.nerf.fine_sampling)
-            loss.render_fine = self.MSE_loss(var.rgb_fine,image)
+            loss.render_fine = self.MSE_loss(var["rgb_fine"],image)
         return loss
 
     def get_pose(self,opt,var,mode=None):
