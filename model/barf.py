@@ -73,7 +73,7 @@ class Model(nerf.Model):
             lr = self.optim_pose.param_groups[0]["lr"]
             self.tb.add_scalar("{0}/{1}".format(split,"lr_pose"),lr,step)
         # compute pose error
-        if split=="train" and opt.data.dataset in ["blender","llff"]:
+        if split=="train" and opt.data.dataset in ["blender","llff","iphone"]:
             pose,pose_GT = self.get_all_training_poses(opt)
             pose_aligned,_ = self.prealign_cameras(opt,pose,pose_GT)
             error = self.evaluate_camera_alignment(opt,pose_aligned,pose_GT)
@@ -93,7 +93,7 @@ class Model(nerf.Model):
         # get ground-truth (canonical) camera poses
         pose_GT = self.train_data.get_all_camera_poses(opt).to(opt.device)
         # add synthetic pose perturbation to all training data
-        if opt.data.dataset=="blender":
+        if opt.data.dataset=="iphone":
             pose = pose_GT
             if opt.camera.noise:
                 pose = camera.pose.compose([self.graph.pose_noise,pose])
@@ -109,11 +109,15 @@ class Model(nerf.Model):
         center = torch.zeros(1,1,3,device=opt.device)
         center_pred = camera.cam2world(center,pose)[:,0] # [N,3]
         center_GT = camera.cam2world(center,pose_GT)[:,0] # [N,3]
-        try:
+
+        #put sim3 back in the block for blender/llff dataset
+
+        """try: 
             sim3 = camera.procrustes_analysis(center_GT,center_pred)
         except:
-            print("warning: SVD did not converge...")
-            sim3 = edict(t0=0,t1=0,s0=1,s1=1,R=torch.eye(3,device=opt.device))
+            print("warning: SVD did not converge...")"""
+        
+        sim3 = edict(t0=0,t1=0,s0=1,s1=1,R=torch.eye(3,device=opt.device))                 
         # align the camera poses
         center_aligned = (center_pred-sim3.t1)/sim3.s1@sim3.R.t()*sim3.s0+sim3.t0
         R_aligned = pose[...,:3]@sim3.R.t()
@@ -132,22 +136,24 @@ class Model(nerf.Model):
         return error
 
     @torch.no_grad()
-    def evaluate_full(self,opt):
+    def evaluate_full(self, opt):
         self.graph.eval()
-        # evaluate rotation/translation
-        pose,pose_GT = self.get_all_training_poses(opt)
-        pose_aligned,self.graph.sim3 = self.prealign_cameras(opt,pose,pose_GT)
-        error = self.evaluate_camera_alignment(opt,pose_aligned,pose_GT)
+        # Evaluate rotation/translation
+        pose, pose_GT = self.get_all_training_poses(opt)
+        pose_aligned, self.graph.sim3 = self.prealign_cameras(opt, pose, pose_GT)
+        error = self.evaluate_camera_alignment(opt, pose_aligned, pose_GT)
         print("--------------------------")
         print("rot:   {:8.3f}".format(np.rad2deg(error.R.mean().cpu())))
         print("trans: {:10.5f}".format(error.t.mean()))
         print("--------------------------")
-        # dump numbers
-        quant_fname = "{}/quant_pose.txt".format(opt.output_path)
-        with open(quant_fname,"w") as file:
-            for i,(err_R,err_t) in enumerate(zip(error.R,error.t)):
-                file.write("{} {} {}\n".format(i,err_R.item(),err_t.item()))
-        # evaluate novel view synthesis
+        # Save transformation matrices for each image
+        transform_fname = "{}/transformation_matrices.txt".format(opt.output_path)
+        with open(transform_fname, "w") as file:
+            for i, T in enumerate(pose_aligned):  # Loop over all aligned poses
+                T_np = T.cpu().numpy()  # Convert to NumPy for easy saving
+                print(f"Transformation matrix for image {i}:\n", T_np)  # Print each matrix
+                file.write(f"Image {i}:\n{T_np}\n\n")  # Save to file
+        # Evaluate novel view synthesis
         super().evaluate_full(opt)
 
     @torch.enable_grad()
@@ -224,15 +230,15 @@ class Graph(nerf.Graph):
                 else: pose = var.pose
             else: pose = self.pose_eye
             # add learnable pose correction
-            var.se3_refine = self.se3_refine.weight[var.idx]
-            pose_refine = camera.lie.se3_to_SE3(var.se3_refine)
+            var["se3_refine"] = self.se3_refine.weight[var["idx"]]
+            pose_refine = camera.lie.se3_to_SE3(var["se3_refine"])
             pose = camera.pose.compose([pose_refine,pose])
         elif mode in ["val","eval","test-optim"]:
             # align test pose to refined coordinate system (up to sim3)
             sim3 = self.sim3
             center = torch.zeros(1,1,3,device=opt.device)
             center = camera.cam2world(center,var.pose)[:,0] # [N,3]
-            center_aligned = (center-sim3.t0)/sim3.s0@sim3.R*sim3.s1+sim3.t1
+            center_aligned = (center-sim3.t0)/(sim3.s0+1e-7)@sim3.R*sim3.s1+sim3.t1
             R_aligned = var.pose[...,:3]@self.sim3.R
             t_aligned = (-R_aligned@center_aligned[...,None])[...,0]
             pose = camera.pose(R=R_aligned,t=t_aligned)
